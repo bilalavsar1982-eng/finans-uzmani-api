@@ -7,7 +7,7 @@ app.use(cors());
 app.use(express.json());
 
 // 🔥 OPENAI API KEYINI BURAYA YAZACAKSIN
-const OPENAI_API_KEY = "*B19821982a*";
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 app.post("/finans-uzmani", async (req, res) => {
     const userMessage = req.body.mesaj || "";
