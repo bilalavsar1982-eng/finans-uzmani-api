@@ -6,19 +6,32 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// 🔥 OPENAI API KEYINI BURAYA YAZACAKSIN
+// 🔥 OPENAI API KEY
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+
+// 🔥 YENİ ALGORİTMA → Kesin konuşur, kısa/uzun vade istemedikçe yapmaz
+const systemPrompt = `
+Sen bir finans uzmanısın.
+Kesin konuşacaksın: cevabın AL, SAT veya BEKLE kararıyla BİTECEK.
+Kullanıcı özellikle "kısa vade" veya "uzun vade" diye sormazsa
+kısa/uzun vade analizi YAPMA.
+
+Sadece sorulan ürüne göre kısa bir analiz yap,
+ve piyasayı 50 kritere göre değerlendir:
+faiz, enflasyon, jeopolitik risk, volatilite, trend, momentum,
+ABD verileri, FED, TCMB, ons, dolar endeksi, risk iştahı,
+altın talebi, petrol, savaş, belirsizlik, piyasa korku endeksi (VIX),
+sermaye akışları, teknik göstergeler, hacim, RSI, MACD vb.
+
+• Kesin hüküm vereceksin.
+• AL / SAT / BEKLE kararlarından biri ile bitireceksin.
+• Kendini yapay zeka olarak tanıtmayacaksın.
+• Kesin, sade, net ve profesyonel konuşacaksın.
+• İlk mesajdan önce: "⚠️ Bu bilgiler yatırım tavsiyesi değildir." diyeceksin.
+`;
+
 app.post("/finans-uzmani", async (req, res) => {
     const userMessage = req.body.mesaj || "";
-
-    const systemPrompt = `
-Sen bir finans uzmanısın.
-Profesyonel, doğal ve insan gibi konuş.
-Kendini yapay zeka olarak TANITMA.
-Her cevapta kısa vadeli ve uzun vadeli AL/SAT/BEKLE değerlendirmesi yap.
-Piyasa hareketleri, risk iştahı, jeopolitik gelişmeler, faizler,
-enflasyon, teknik analiz, momentum, trend, volatilite ve 50 kriteri hesaba kat.
-`;
 
     const payload = {
         model: "gpt-4o-mini",
