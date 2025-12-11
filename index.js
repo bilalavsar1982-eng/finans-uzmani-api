@@ -8,56 +8,117 @@ app.use(express.json());
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
-// ================================
-//   GÜÇLENDİRİLMİŞ YENİ BACKEND
-// ================================
+// ===========================================
+//  TÜM ÜRÜNLERİN KARARLARINI TUTAN HAFIZA
+// ===========================================
+let GLOBAL_DECISIONS = {};  
+
+// ===========================================
+//  Açılışta 1 defa tüm ürünler için analiz yap
+// ===========================================
+async function generateAllDecisionsOnStartup() {
+
+    const products = [
+        { name: "Gram Altın", code: "HASTRY" },
+        { name: "Ons Altın", code: "ONS" },
+        { name: "Dolar/TL", code: "USDTRY" },
+        { name: "Euro/TL", code: "EURTRY" },
+        { name: "Gümüş", code: "GUMUSTL" },
+        { name: "Çeyrek Altın", code: "YENI CEYREK" },
+        { name: "Yarım Altın", code: "YENI YARIM" },
+        { name: "Tam Altın", code: "YENI TAM" },
+        { name: "Ata Lira", code: "YENI ATA" },
+        { name: "22 Ayar", code: "22 AYAR" }
+    ];
+
+    for (let p of products) {
+        try {
+            const systemPrompt = `
+Sen deneyimli bir finans analistisin.
+Sadece son satırda tek kelime ile karar ver: AL / SAT / BEKLE.
+Detay yazma, yalnızca karar ver.
+
+Ürün: ${p.name}
+
+Karar Formatı:
+Karar: AL
+Karar: SAT
+Karar: BEKLE
+`;
+
+            const payload = {
+                model: "gpt-4o-mini",
+                messages: [
+                    { role: "system", content: systemPrompt },
+                    { role: "user", content: "Bu ürün için güncel piyasa koşullarına göre karar ver." }
+                ]
+            };
+
+            const response = await fetch("https://api.openai.com/v1/chat/completions", {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${OPENAI_API_KEY}`,
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify(payload)
+            });
+
+            const text = await response.text();
+
+            let answer = "";
+            try {
+                answer = JSON.parse(text)?.choices?.[0]?.message?.content || "";
+            } catch {
+                answer = text;
+            }
+
+            answer = answer.toUpperCase();
+
+            let decision = "BEKLE";
+            if (answer.includes("KARAR: AL")) decision = "AL";
+            if (answer.includes("KARAR: SAT")) decision = "SAT";
+
+            GLOBAL_DECISIONS[p.code] = decision;
+
+        } catch (err) {
+            GLOBAL_DECISIONS[p.code] = "BEKLE";
+        }
+    }
+
+    console.log("✔ Açılış kararları oluşturuldu:", GLOBAL_DECISIONS);
+}
+
+// Açılışta 1 kere çalıştır
+generateAllDecisionsOnStartup();
+
+// ====================================================
+//  ANDROID → TÜM KARARLARI ÇEKSİN
+// ====================================================
+app.get("/tum-kararlar", (req, res) => {
+    res.json(GLOBAL_DECISIONS);
+});
+
+// ====================================================
+//  SOHBET API (AYNEN KALDI)
+// ====================================================
 app.post("/finans-uzmani", async (req, res) => {
 
     const userMessage = req.body.mesaj || "";
     const productCode = req.body.code || "";
 
-    // Tek prompt → Açılış + Sohbet aynı kararı üretir
     const systemPrompt = `
 Sen profesyonel bir finans analistisın.
-Kendini yapay zeka olarak tanıtma. İnsan gibi konuş.
+İnsan gibi konuş, kendini asla yapay zekâ olarak tanıtma.
 
-ÜRÜN KODU: ${productCode}
+Ürün Kodu: ${productCode}
 
-=====================
-GENEL KURALLAR
-=====================
-- Aynı ürün için aynı karar verilmeli.
-- Analiz 6–12 cümle olsun, uzatma.
-- Teknik + temel analiz harmanla.
-- Son satırda mutlaka şu biçimde bitir:
-
-KARAR: AL
-KARAR: SAT
-KARAR: BEKLE
-
-Son satır dışında AL/SAT/BEKLE kelimesi KULLANMA.
-
-=====================
-DEĞERLENDİRİLEN KRİTERLER
-=====================
-tcmb, fed, ecb, tahvil faizleri, dxy, cds, enflasyon, büyüme,
-piyasa psikolojisi, destek–direnç, trend, momentum, hacim,
-endüstriyel talep (gümüş), jeopolitik risk, risk iştahı,
-likidite, petrol fiyatları, ETF akımları ve global veri akışı.
-
-=====================
-ÜRÜNLERE ÖZEL ALGORİTMA
-=====================
-ALTIN / ONS / GRAM → dxy zayıf + faiz düşüşü → AL, dxy güçlü → SAT, belirsiz → BEKLE  
-USDTRY → tcmb sıkı → BEKLE/SAT, dxy güçlü → AL  
-EURTRY → ecb sıkı + tcmb gevşek → AL, karışık görünüm → BEKLE  
-GÜMÜŞ → sanayi talebi güçlü → AL, dolar güçlü → SAT, belirsiz → BEKLE
+Cevabın sonunda mutlaka:
+Karar: AL / SAT / BEKLE
+yaz.
 `;
 
     const payload = {
         model: "gpt-4o-mini",
-        max_tokens: 500,
-        temperature: 0.3,
         messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: userMessage }
@@ -71,54 +132,25 @@ GÜMÜŞ → sanayi talebi güçlü → AL, dolar güçlü → SAT, belirsiz →
                 "Authorization": `Bearer ${OPENAI_API_KEY}`,
                 "Content-Type": "application/json"
             },
-            body: JSON.stringify(payload),
-            timeout: 45000 // 45 saniye
+            body: JSON.stringify(payload)
         });
 
-        const raw = await response.text();
-        let aiMessage;
+        const text = await response.text();
+        let aiMessage = "Cevap alınamadı.";
 
         try {
-            const d = JSON.parse(raw);
-            aiMessage = d?.choices?.[0]?.message?.content;
+            aiMessage = JSON.parse(text)?.choices?.[0]?.message?.content || aiMessage;
         } catch {
-            aiMessage = raw;
-        }
-
-        // AI boş cevap verirse → Yedek ALGORİTMA devreye girer
-        if (!aiMessage || aiMessage.trim() === "") {
-            aiMessage = fallbackDecision(productCode);
+            aiMessage = text;
         }
 
         res.json(aiMessage);
 
     } catch (err) {
-        // Timeout veya OpenAI hatasında fallback karar ver
-        return res.json(fallbackDecision(productCode));
+        res.json("Sunucu hatası: " + err.message);
     }
 });
 
-// =============================================
-//          YEDEK KARAR ALGORİTMASI
-//         (AI ÇÖKERSE DEVREYE GİRER)
-// =============================================
-function fallbackDecision(code) {
-
-    const random = Math.random();
-
-    let karar = "BEKLE";
-
-    if (random < 0.33) karar = "AL";
-    else if (random < 0.66) karar = "SAT";
-
-    return `
-Kısa değerlendirme: Sistem yoğunluğu nedeniyle hızlı analiz moduna geçildi.
-Bu modda temel trend, volatilite ve ürün bazlı hareketlere göre en makul karar üretildi.
-
-KARAR: ${karar}
-`;
-}
-
 app.listen(3000, () => {
-    console.log("🔥 Finans Uzmanı API ÇALIŞIYOR");
+    console.log("🚀 Finans Uzmanı API ÇALIŞIYOR!");
 });
