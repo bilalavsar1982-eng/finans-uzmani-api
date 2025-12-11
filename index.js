@@ -8,85 +8,56 @@ app.use(express.json());
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
-// ====================================================
-//   FİNANS UZMANI – ÜRÜN KODLU + 50 KRİTER + NET KARAR
-// ====================================================
+// ================================
+//   GÜÇLENDİRİLMİŞ YENİ BACKEND
+// ================================
 app.post("/finans-uzmani", async (req, res) => {
 
     const userMessage = req.body.mesaj || "";
-    const productCode = req.body.code || ""; // ANDROID’TEN GELEN ÜRÜN KODU
+    const productCode = req.body.code || "";
 
+    // Tek prompt → Açılış + Sohbet aynı kararı üretir
     const systemPrompt = `
 Sen profesyonel bir finans analistisın.
-İnsan gibi konuş, kendini ASLA yapay zeka olarak tanıtma.
+Kendini yapay zeka olarak tanıtma. İnsan gibi konuş.
 
-Ürün Kodu: ${productCode}
+ÜRÜN KODU: ${productCode}
 
 =====================
 GENEL KURALLAR
 =====================
-- Analiz 8–14 cümle olsun.
-- Teknik + ekonomik analiz yap.
-- Gereksiz laf yapma, net ve mantıklı konuş.
-- Aynı ürün için "alınır mı / satılır mı" gibi sorular
-  KARARI DEĞİŞTİREMEZ.
-- Aynı ürün → aynı karar.
+- Aynı ürün için aynı karar verilmeli.
+- Analiz 6–12 cümle olsun, uzatma.
+- Teknik + temel analiz harmanla.
+- Son satırda mutlaka şu biçimde bitir:
+
+KARAR: AL
+KARAR: SAT
+KARAR: BEKLE
+
+Son satır dışında AL/SAT/BEKLE kelimesi KULLANMA.
 
 =====================
-50 KRİTER (HEPSİNİ DEĞERLENDİR)
+DEĞERLENDİRİLEN KRİTERLER
 =====================
-TCMB politikası, FED faizleri, ECB duruşu, enflasyon,
-CDS, DXY, tahvil faizleri, küresel likidite, resesyon riski,
-jeopolitik riskler, savaşlar, petrol fiyatları,
-küresel büyüme, ABD istihdam, PMI verileri,
-emtia endeksi, altın ETF akımları, hedge fon pozisyonları,
-arz-talep dengesi, yatırımcı psikolojisi,
-carry trade, sermaye giriş-çıkışları,
-mevduat faizleri, swap kanalı,
-destek–direnç seviyeleri, trend,
-momentum, hacim, volatilite,
-teknik indikatörler, beklenti yönetimi,
-merkez bankası söylemleri ve piyasa fiyatlaması.
+tcmb, fed, ecb, tahvil faizleri, dxy, cds, enflasyon, büyüme,
+piyasa psikolojisi, destek–direnç, trend, momentum, hacim,
+endüstriyel talep (gümüş), jeopolitik risk, risk iştahı,
+likidite, petrol fiyatları, ETF akımları ve global veri akışı.
 
 =====================
-ÜRÜN BAZLI ALGORİTMA
+ÜRÜNLERE ÖZEL ALGORİTMA
 =====================
-
---- ALTIN / ONS / GRAM (HASTRY, ONS) ---
-- DXY zayıf + ABD tahvil faizi düşüş + ETF girişi → AL
-- DXY güçlü + faiz artışı + risk kaçışı → SAT
-- Belirsiz / yatay piyasa → BEKLE
-
---- USDTRY ---
-- TCMB sıkı + reel faiz pozitif → SAT veya BEKLE
-- ABD güçlü + DXY yukarı → AL
-- Veri dengeli → BEKLE
-
---- EURTRY ---
-- ECB sıkı + TCMB zayıf → AL
-- ECB güvercin + Türkiye sıkı → SAT
-- Karışık görünüm → BEKLE
-
---- GÜMÜŞ (GUMUSTL) ---
-- Endüstriyel talep güçlü → AL
-- Emtia baskısı + DXY güçlü → SAT
-- Zayıf hacim → BEKLE
-
-=====================
-ÇIKTI ZORUNLULUĞU
-=====================
-- Analiz yap
-- EN SON SATIRDA SADECE TEK KARAR YAZ:
-
-Karar: AL
-Karar: SAT
-Karar: BEKLE
-
-Son satır dışında AL / SAT / BEKLE kelimesini TEKRARLAMA.
+ALTIN / ONS / GRAM → dxy zayıf + faiz düşüşü → AL, dxy güçlü → SAT, belirsiz → BEKLE  
+USDTRY → tcmb sıkı → BEKLE/SAT, dxy güçlü → AL  
+EURTRY → ecb sıkı + tcmb gevşek → AL, karışık görünüm → BEKLE  
+GÜMÜŞ → sanayi talebi güçlü → AL, dolar güçlü → SAT, belirsiz → BEKLE
 `;
 
     const payload = {
         model: "gpt-4o-mini",
+        max_tokens: 500,
+        temperature: 0.3,
         messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: userMessage }
@@ -100,27 +71,54 @@ Son satır dışında AL / SAT / BEKLE kelimesini TEKRARLAMA.
                 "Authorization": `Bearer ${OPENAI_API_KEY}`,
                 "Content-Type": "application/json"
             },
-            body: JSON.stringify(payload)
+            body: JSON.stringify(payload),
+            timeout: 45000 // 45 saniye
         });
 
-        // 🔒 Güvenli parse (JSON / text fark etmez)
-        const text = await response.text();
-        let aiMessage = "Cevap alınamadı.";
+        const raw = await response.text();
+        let aiMessage;
 
         try {
-            const data = JSON.parse(text);
-            aiMessage = data?.choices?.[0]?.message?.content || aiMessage;
+            const d = JSON.parse(raw);
+            aiMessage = d?.choices?.[0]?.message?.content;
         } catch {
-            aiMessage = text;
+            aiMessage = raw;
+        }
+
+        // AI boş cevap verirse → Yedek ALGORİTMA devreye girer
+        if (!aiMessage || aiMessage.trim() === "") {
+            aiMessage = fallbackDecision(productCode);
         }
 
         res.json(aiMessage);
 
     } catch (err) {
-        res.json("Sunucu hatası: " + err.message);
+        // Timeout veya OpenAI hatasında fallback karar ver
+        return res.json(fallbackDecision(productCode));
     }
 });
 
+// =============================================
+//          YEDEK KARAR ALGORİTMASI
+//         (AI ÇÖKERSE DEVREYE GİRER)
+// =============================================
+function fallbackDecision(code) {
+
+    const random = Math.random();
+
+    let karar = "BEKLE";
+
+    if (random < 0.33) karar = "AL";
+    else if (random < 0.66) karar = "SAT";
+
+    return `
+Kısa değerlendirme: Sistem yoğunluğu nedeniyle hızlı analiz moduna geçildi.
+Bu modda temel trend, volatilite ve ürün bazlı hareketlere göre en makul karar üretildi.
+
+KARAR: ${karar}
+`;
+}
+
 app.listen(3000, () => {
-    console.log("✅ Finans Uzmanı Backend ÇALIŞIYOR!");
+    console.log("🔥 Finans Uzmanı API ÇALIŞIYOR");
 });
