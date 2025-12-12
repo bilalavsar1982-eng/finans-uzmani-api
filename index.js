@@ -11,89 +11,90 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const rss = new Parser();
 
 // ======================================================
-//  GOOGLE NEWS RSS KAYNAKLARI
+// 🇹🇷 TÜRKİYE + FİNANS ODAKLI GOOGLE NEWS RSS
 // ======================================================
 const NEWS_FEEDS = [
-    "https://news.google.com/rss/search?q=altın",
-    "https://news.google.com/rss/search?q=gram+altın",
-    "https://news.google.com/rss/search?q=dolar",
-    "https://news.google.com/rss/search?q=ons",
-    "https://news.google.com/rss/search?q=fed+faiz",
-    "https://news.google.com/rss/search?q=tcmb",
-    "https://news.google.com/rss/search?q=jeopolitik"
+    // ALTIN
+    "https://news.google.com/rss/search?q=altın+fiyatları&hl=tr&gl=TR&ceid=TR:tr",
+    "https://news.google.com/rss/search?q=gram+altın&hl=tr&gl=TR&ceid=TR:tr",
+    "https://news.google.com/rss/search?q=ons+altın&hl=tr&gl=TR&ceid=TR:tr",
+
+    // GÜMÜŞ
+    "https://news.google.com/rss/search?q=gümüş+fiyatları&hl=tr&gl=TR&ceid=TR:tr",
+
+    // DÖVİZ
+    "https://news.google.com/rss/search?q=dolar+tl&hl=tr&gl=TR&ceid=TR:tr",
+    "https://news.google.com/rss/search?q=euro+tl&hl=tr&gl=TR&ceid=TR:tr",
+
+    // MAKRO
+    "https://news.google.com/rss/search?q=tcmb&hl=tr&gl=TR&ceid=TR:tr",
+    "https://news.google.com/rss/search?q=merkez+bankası+faiz&hl=tr&gl=TR&ceid=TR:tr",
+    "https://news.google.com/rss/search?q=jeopolitik+riskler&hl=tr&gl=TR&ceid=TR:tr"
 ];
 
-let GLOBAL_NEWS = [];  // Android buradan okuyacak
+let GLOBAL_NEWS = [];
 
 // ======================================================
-//  1) RSS → Haberleri çek (30 tane)
+// 1️⃣ RSS → HAM HABERLER
 // ======================================================
 async function fetchRawNews() {
-    let results = [];
+    const results = [];
 
-    for (let feed of NEWS_FEEDS) {
+    for (const feed of NEWS_FEEDS) {
         try {
             const parsed = await rss.parseURL(feed);
 
-            for (let item of parsed.items) {
-                const summary = `${item.title} ${item.contentSnippet}`;
+            for (const item of parsed.items) {
                 results.push({
-                    title: item.title,
-                    content: item.contentSnippet,
-                    date: item.pubDate,
-                    summary: summary
+                    title: item.title || "",
+                    content: item.contentSnippet || "",
+                    date: item.pubDate || "",
+                    summary: `${item.title} ${item.contentSnippet}`
                 });
             }
-
         } catch (err) {
-            console.log("RSS Hatası:", err);
+            console.log("RSS hata:", err.message);
         }
     }
 
-    // En fazla 30 haber
-    return results.slice(0, 30);
+    return results.slice(0, 40);
 }
 
 // ======================================================
-//  2) GPT → 30 HABERİ TEK SEFERDE SINIFLANDIR
+// 2️⃣ GPT → SADECE ETİKETLE
 // ======================================================
 async function classifyNewsBatch(newsList) {
 
-    const newsText = newsList.map((n, i) => {
-        return `${i+1}) ${n.summary}`;
-    }).join("\n\n");
+    const text = newsList.map((n, i) =>
+        `${i + 1}) ${n.summary}`
+    ).join("\n\n");
 
     const prompt = `
-Aşağıda 30 haber metni var.
-Her haber için şu formatta JSON üret:
+Aşağıdaki haberleri sınıflandır.
 
+Sadece JSON array döndür.
+Açıklama yazma.
+
+Format:
 [
- { "category":"FED", "importance":"HIGH", "isTurkey":false },
- { "category":"GOLD", "importance":"LOW", "isTurkey":true },
+ { "category":"GOLD", "importance":"HIGH", "isTurkey":true },
  ...
 ]
 
-Kategori seçenekleri:
-FED, TCMB, GOLD, DXY, GEOPOLITIC, INFLATION, MARKET, OTHER
+Kategori:
+GOLD, SILVER, FED, TCMB, DXY, GEOPOLITIC, INFLATION, MARKET, OTHER
 
-Önem dereceleri:
-HIGH, MEDIUM, LOW
-
-Sadece JSON üret, açıklama yazma.
-
-Haberler:
-${newsText}
+${text}
 `;
 
     const payload = {
         model: "gpt-4o-mini",
-        messages: [
-            { role: "system", content: prompt }
-        ]
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0
     };
 
     try {
-        const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+        const r = await fetch("https://api.openai.com/v1/chat/completions", {
             method: "POST",
             headers: {
                 "Authorization": `Bearer ${OPENAI_API_KEY}`,
@@ -102,72 +103,47 @@ ${newsText}
             body: JSON.stringify(payload)
         });
 
-        const txt = await resp.text();
-        let arr = [];
+        const data = await r.json();
+        return JSON.parse(data.choices[0].message.content);
 
-        try {
-            arr = JSON.parse(txt);
-        } catch {
-            console.log("GPT JSON parse hatası:", txt);
-        }
-
-        return arr;
-
-    } catch (err) {
-        console.log("GPT toplu sınıflandırma hatası:", err);
+    } catch (e) {
+        console.log("GPT hata:", e.message);
         return [];
     }
 }
 
 // ======================================================
-//  3) HABER MOTORU → 3 saatte bir çalışır
+// 3️⃣ ANA MOTOR
 // ======================================================
 async function updateNews() {
+    console.log("⏳ Haber güncelleniyor...");
 
-    console.log("⏳ Haberler çekiliyor...");
-
-    const raw = await fetchRawNews();  // 30 adet haber
+    const raw = await fetchRawNews();
     const ai = await classifyNewsBatch(raw);
 
-    const finalNews = [];
-
-    for (let i = 0; i < raw.length; i++) {
-        const base = raw[i];
-        const cls  = ai[i] || {
-            category: "OTHER",
-            importance: "LOW",
-            isTurkey: false
+    GLOBAL_NEWS = raw.map((n, i) => {
+        const c = ai[i] || {};
+        return {
+            title: n.title,
+            content: n.content,
+            date: n.date,
+            category: c.category || "OTHER",
+            importance: c.importance || "LOW",
+            isTurkey: c.isTurkey ?? true
         };
+    });
 
-        finalNews.push({
-            title: base.title,
-            content: base.content,
-            date: base.date,
-            category: cls.category,
-            importance: cls.importance,
-            isTurkey: cls.isTurkey
-        });
-    }
-
-    GLOBAL_NEWS = finalNews;
-
-    console.log("✔ Haberler güncellendi:", GLOBAL_NEWS.length);
+    console.log("✔ Haber sayısı:", GLOBAL_NEWS.length);
 }
 
-// İlk yüklemede çalıştır
 updateNews();
-
-// Her 3 saatte tekrar
 setInterval(updateNews, 1000 * 60 * 60 * 3);
 
-// ======================================================
-//  ANDROID → HABERLERİ AL
 // ======================================================
 app.get("/haberler", (req, res) => {
     res.json(GLOBAL_NEWS);
 });
 
-// ======================================================
 app.listen(3000, () => {
-    console.log("🚀 Haber + Finans Uzmanı Backend ÇALIŞIYOR!");
+    console.log("🚀 Finans Haber Backend ÇALIŞIYOR");
 });
