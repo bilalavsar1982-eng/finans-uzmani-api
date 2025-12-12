@@ -1,102 +1,132 @@
 import express from "express";
+import cors from "cors";
 import fetch from "node-fetch";
 import xml2js from "xml2js";
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+app.use(cors());
+app.use(express.json());
 
+const PORT = process.env.PORT || 3000;
 const parser = new xml2js.Parser({ explicitArray: false });
 
 // =======================================================
-// 🔥 GOOGLE NEWS RSS LİSTESİ (FİNANS ODAKLI – FİLTRELİ)
+// 🔥 GOOGLE NEWS RSS – TR SABİT + FİNANS ODAKLI
 // =======================================================
 const NEWS_FEEDS = [
-
   // ALTIN
   "https://news.google.com/rss/search?q=gram+altin+fiyat",
-  "https://news.google.com/rss/search?q=ons+altin+gold+price",
-  "https://news.google.com/rss/search?q=altin+fiyatlari+finans",
+  "https://news.google.com/rss/search?q=ons+altin+fiyat",
+  "https://news.google.com/rss/search?q=altin+fiyatlari",
   "https://news.google.com/rss/search?q=gold+price+market",
 
-  // BİLEZİK / ATA / ÇEYREK
+  // BİLEZİK / ATA / ÇEYREK / YARIM
   "https://news.google.com/rss/search?q=22+ayar+bilezik+fiyat",
   "https://news.google.com/rss/search?q=ata+lira+altin",
   "https://news.google.com/rss/search?q=ceyrek+altin+fiyat",
   "https://news.google.com/rss/search?q=yarim+altin+fiyat",
 
   // DOLAR
-  "https://news.google.com/rss/search?q=dolar+tl+kur",
-  "https://news.google.com/rss/search?q=usd+try",
-  "https://news.google.com/rss/search?q=turkish+lira+usd",
+  "https://news.google.com/rss/search?q=dolar+tl",
+  "https://news.google.com/rss/search?q=usdtry",
   "https://news.google.com/rss/search?q=doviz+kur",
 
   // EURO
   "https://news.google.com/rss/search?q=euro+tl",
-  "https://news.google.com/rss/search?q=eur+try",
+  "https://news.google.com/rss/search?q=eurtry",
 
   // MAKRO
-  "https://news.google.com/rss/search?q=fed+interest+rate",
-  "https://news.google.com/rss/search?q=tcmb+faiz+karari",
-  "https://news.google.com/rss/search?q=inflation+turkey",
-  "https://news.google.com/rss/search?q=geopolitical+risk+market"
+  "https://news.google.com/rss/search?q=tcmb+faiz",
+  "https://news.google.com/rss/search?q=fed+faiz",
+  "https://news.google.com/rss/search?q=enflasyon+turkiye",
+  "https://news.google.com/rss/search?q=jeopolitik+risk+piyasa"
 ];
 
 // =======================================================
 // 🧠 YARDIMCI FONKSİYONLAR
 // =======================================================
+function toTrFeed(url) {
+  const suffix = "hl=tr&gl=TR&ceid=TR:tr";
+  return url.includes("?") ? `${url}&${suffix}` : `${url}?${suffix}`;
+}
+
 function cleanText(s = "") {
-  return s
+  return String(s)
     .replace(/<[^>]*>/g, "")
+    .replace(/&nbsp;/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
 
 function isTurkey(text) {
   const t = text.toLowerCase();
-  return t.includes("türkiye") || t.includes("tcmb") || t.includes("ankara");
+  return (
+    t.includes("türkiye") ||
+    t.includes("turkiye") ||
+    t.includes("tcmb") ||
+    t.includes("ankara") ||
+    t.includes("istanbul") ||
+    t.includes("bist")
+  );
 }
 
 function detectImportance(title) {
   const t = title.toLowerCase();
+
   if (
     t.includes("faiz") ||
     t.includes("fed") ||
     t.includes("tcmb") ||
-    t.includes("enflasyon") ||
-    t.includes("interest rate")
+    t.includes("enflasyon")
   ) return "HIGH";
-  if (t.includes("kur") || t.includes("market") || t.includes("price"))
-    return "MEDIUM";
+
+  if (
+    t.includes("dolar") ||
+    t.includes("euro") ||
+    t.includes("altın") ||
+    t.includes("altin") ||
+    t.includes("ons") ||
+    t.includes("kur") ||
+    t.includes("borsa") ||
+    t.includes("market") ||
+    t.includes("price")
+  ) return "MEDIUM";
+
   return "LOW";
 }
 
-// ❌ KİŞİ İSMİ / ALAKASIZ HABER FİLTRESİ
 function isGarbage(title, content) {
   const t = (title + " " + content).toLowerCase();
 
   return (
     t.includes("altin dumani") ||
     t.includes("altin krasniqi") ||
-    t.includes("altin gün") ||
     t.includes("director meets") ||
     t.includes("video") ||
     t.includes("music") ||
-    t.includes("song")
+    t.includes("song") ||
+    t.includes("the fire note")
   );
 }
 
 // =======================================================
-// 🚀 API ENDPOINT
+// 🚀 HABER TOPLAYICI
 // =======================================================
-app.get("/news", async (req, res) => {
-  console.log("⏳ Haber güncelleniyor...");
-
+async function fetchNews() {
   const allNews = [];
+  const seen = new Set();
 
-  for (const url of NEWS_FEEDS) {
+  for (const raw of NEWS_FEEDS) {
+    const url = encodeURI(toTrFeed(raw));
+
     try {
-      const response = await fetch(url);
-      const xml = await response.text();
+      const res = await fetch(url, {
+        headers: {
+          "User-Agent": "Mozilla/5.0"
+        }
+      });
+
+      const xml = await res.text();
       const json = await parser.parseStringPromise(xml);
 
       const items = json?.rss?.channel?.item;
@@ -112,6 +142,10 @@ app.get("/news", async (req, res) => {
         if (!title) continue;
         if (isGarbage(title, content)) continue;
 
+        const key = (title + date).toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+
         allNews.push({
           title,
           content,
@@ -120,33 +154,30 @@ app.get("/news", async (req, res) => {
           isTurkey: isTurkey(title + " " + content)
         });
       }
-
-    } catch (err) {
-      console.log("RSS hata:", err.message);
+    } catch (e) {
+      console.log("RSS hata:", e.message);
     }
   }
 
-  // ===================================================
-  // 🔥 TEKRAR TEMİZLEME + SIRALAMA
-  // ===================================================
-  const seen = new Set();
-  const unique = [];
+  allNews.sort((a, b) => new Date(b.date) - new Date(a.date));
+  return allNews.slice(0, 50);
+}
 
-  for (const n of allNews) {
-    const key = (n.title + n.date).toLowerCase();
-    if (!seen.has(key)) {
-      seen.add(key);
-      unique.push(n);
-    }
-  }
+// =======================================================
+// 🌐 ENDPOINTLER
+// =======================================================
+app.get("/news", async (req, res) => {
+  console.log("⏳ Haber güncelleniyor...");
+  const data = await fetchNews();
+  console.log(`✔ Haber sayısı: ${data.length}`);
+  res.json(data);
+});
 
-  unique.sort((a, b) => new Date(b.date) - new Date(a.date));
-
-  const finalNews = unique.slice(0, 50);
-
-  console.log(`✔ Haber sayısı: ${finalNews.length}`);
-
-  res.json(finalNews);
+app.get("/haberler", async (req, res) => {
+  console.log("⏳ Haber güncelleniyor...");
+  const data = await fetchNews();
+  console.log(`✔ Haber sayısı: ${data.length}`);
+  res.json(data);
 });
 
 // =======================================================
