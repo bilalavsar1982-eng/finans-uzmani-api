@@ -11,46 +11,48 @@ const PORT = process.env.PORT || 3000;
 const parser = new xml2js.Parser({ explicitArray: false });
 
 // =======================================================
-// 🔥 GOOGLE NEWS RSS – TR + FİNANS (DÜZELTİLDİ)
+// 🔥 GOOGLE NEWS – SADECE FİNANS / EKONOMİ
 // =======================================================
-const NEWS_FEEDS = [
-  // ALTIN
-  "https://news.google.com/rss/search?q=gram+altin+fiyat",
-  "https://news.google.com/rss/search?q=ons+altin+fiyat",
-  "https://news.google.com/rss/search?q=altin+fiyatlari",
-  "https://news.google.com/rss/search?q=gold+price",
+const FEEDS = {
+  ALTIN: [
+    "https://news.google.com/rss/search?q=altın+fiyatları+ekonomi",
+    "https://news.google.com/rss/search?q=gram+altın+fiyat",
+    "https://news.google.com/rss/search?q=ons+altın+gold+price"
+  ],
 
-  // GÜMÜŞ ✅
-  "https://news.google.com/rss/search?q=gumus+fiyat",
-  "https://news.google.com/rss/search?q=silver+price",
+  CEYREK: [
+    "https://news.google.com/rss/search?q=çeyrek+altın+fiyat+ekonomi"
+  ],
 
-  // BİLEZİK / ATA / ÇEYREK / YARIM
-  "https://news.google.com/rss/search?q=22+ayar+bilezik",
-  "https://news.google.com/rss/search?q=ata+lira",
-  "https://news.google.com/rss/search?q=ceyrek+altin",
-  "https://news.google.com/rss/search?q=yarim+altin",
+  DOLAR: [
+    "https://news.google.com/rss/search?q=dolar+tl+ekonomi",
+    "https://news.google.com/rss/search?q=usdtry+ekonomi"
+  ],
 
-  // DOLAR
-  "https://news.google.com/rss/search?q=dolar+tl",
-  "https://news.google.com/rss/search?q=usd+try",
-  "https://news.google.com/rss/search?q=usdtry",
+  EURO: [
+    "https://news.google.com/rss/search?q=euro+tl+ekonomi",
+    "https://news.google.com/rss/search?q=eurtry+ekonomi"
+  ],
 
-  // EURO
-  "https://news.google.com/rss/search?q=euro+tl",
-  "https://news.google.com/rss/search?q=eur+try",
+  GUMUS: [
+    "https://news.google.com/rss/search?q=gümüş+fiyatları+ekonomi",
+    "https://news.google.com/rss/search?q=silver+price+market"
+  ],
 
-  // MAKRO
-  "https://news.google.com/rss/search?q=tcmb+faiz",
-  "https://news.google.com/rss/search?q=fed+faiz",
-  "https://news.google.com/rss/search?q=enflasyon+turkiye"
-];
+  MAKRO: [
+    "https://news.google.com/rss/search?q=tcmb+faiz+kararı",
+    "https://news.google.com/rss/search?q=fed+interest+rate",
+    "https://news.google.com/rss/search?q=enflasyon+turkiye+ekonomi"
+  ]
+};
 
 // =======================================================
-// 🧠 YARDIMCI
+// 🧠 YARDIMCI FONKSİYONLAR
 // =======================================================
-function toTrFeed(url) {
-  const suffix = "hl=tr&gl=TR&ceid=TR:tr";
-  return url.includes("?") ? `${url}&${suffix}` : `${url}?${suffix}`;
+function toTr(url) {
+  return url.includes("?")
+    ? `${url}&hl=tr&gl=TR&ceid=TR:tr`
+    : `${url}?hl=tr&gl=TR&ceid=TR:tr`;
 }
 
 function cleanText(s = "") {
@@ -61,15 +63,21 @@ function cleanText(s = "") {
     .trim();
 }
 
-function isTurkey(text) {
-  const t = text.toLowerCase();
+function isGarbage(title, content) {
+  const t = (title + " " + content).toLowerCase();
+
   return (
-    t.includes("türkiye") ||
-    t.includes("turkiye") ||
-    t.includes("tcmb") ||
-    t.includes("ankara") ||
-    t.includes("istanbul") ||
-    t.includes("bist")
+    t.includes("gelinim") ||
+    t.includes("mutfakta") ||
+    t.includes("yarışma") ||
+    t.includes("dizi") ||
+    t.includes("oyuncu") ||
+    t.includes("final") ||
+    t.includes("kim elendi") ||
+    t.includes("video") ||
+    t.includes("magazin") ||
+    t.includes("şarkı") ||
+    t.includes("song")
   );
 }
 
@@ -87,24 +95,21 @@ function detectImportance(title) {
     t.includes("dolar") ||
     t.includes("euro") ||
     t.includes("altın") ||
-    t.includes("altin") ||
-    t.includes("ons") ||
     t.includes("gümüş") ||
-    t.includes("gumus") ||
-    t.includes("silver")
+    t.includes("ons") ||
+    t.includes("kur")
   ) return "MEDIUM";
 
   return "LOW";
 }
 
-function isGarbage(title, content) {
-  const t = (title + " " + content).toLowerCase();
+function isTurkey(text) {
+  const t = text.toLowerCase();
   return (
-    t.includes("altin dumani") ||
-    t.includes("altin krasniqi") ||
-    t.includes("music") ||
-    t.includes("song") ||
-    t.includes("video")
+    t.includes("türkiye") ||
+    t.includes("turkiye") ||
+    t.includes("tcmb") ||
+    t.includes("bist")
   );
 }
 
@@ -112,64 +117,65 @@ function isGarbage(title, content) {
 // 🚀 HABER TOPLAMA (TEMİZ)
 // =======================================================
 async function fetchNews() {
-  const allNews = [];
+  const all = [];
   const seen = new Set();
 
-  for (const raw of NEWS_FEEDS) {
-    const url = toTrFeed(raw);
+  for (const group of Object.values(FEEDS)) {
+    for (const rawUrl of group) {
 
-    try {
-      const res = await fetch(url, {
-        headers: { "User-Agent": "Mozilla/5.0" }
-      });
-
-      const xml = await res.text();
-      const json = await parser.parseStringPromise(xml);
-
-      const items = json?.rss?.channel?.item;
-      if (!items) continue;
-
-      const list = Array.isArray(items) ? items : [items];
-
-      for (const it of list) {
-        const title = cleanText(it.title);
-        const content = cleanText(it.description || "");
-        const date = it.pubDate || "";
-
-        if (!title) continue;
-        if (isGarbage(title, content)) continue;
-
-        const key = (title + date).toLowerCase();
-        if (seen.has(key)) continue;
-        seen.add(key);
-
-        allNews.push({
-          title,
-          content,
-          date,
-          importance: detectImportance(title),
-          isTurkey: isTurkey(title + " " + content)
+      try {
+        const res = await fetch(toTr(rawUrl), {
+          headers: { "User-Agent": "Mozilla/5.0" }
         });
+
+        const xml = await res.text();
+        const json = await parser.parseStringPromise(xml);
+        const items = json?.rss?.channel?.item;
+        if (!items) continue;
+
+        const list = Array.isArray(items) ? items : [items];
+
+        for (const it of list) {
+          const title = cleanText(it.title);
+          const content = cleanText(it.description || "");
+          const date = it.pubDate || "";
+
+          if (!title) continue;
+          if (isGarbage(title, content)) continue;
+
+          const key = (title + date).toLowerCase();
+          if (seen.has(key)) continue;
+          seen.add(key);
+
+          all.push({
+            title,
+            content,
+            date,
+            importance: detectImportance(title),
+            isTurkey: isTurkey(title + " " + content)
+          });
+        }
+
+      } catch (e) {
+        console.log("RSS hata:", e.message);
       }
-    } catch (e) {
-      console.log("RSS hata:", e.message);
     }
   }
 
-  allNews.sort((a, b) => new Date(b.date) - new Date(a.date));
-  return allNews.slice(0, 50);
+  all.sort((a, b) => new Date(b.date) - new Date(a.date));
+  return all.slice(0, 50);
 }
 
 // =======================================================
 // 🌐 ENDPOINTLER
 // =======================================================
-app.get("/news", async (req, res) => {
+app.get("/news", async (_, res) => {
   const data = await fetchNews();
   console.log(`✔ Haber sayısı: ${data.length}`);
   res.json(data);
 });
 
-app.get("/haberler", async (req, res) => {
+app.get("/haberler", async (_, res) => {
   const data = await fetchNews();
   console.log(`✔ Haber sayısı: ${data.length}`);
   res.json(data);
