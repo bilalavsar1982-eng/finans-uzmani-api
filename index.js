@@ -11,7 +11,7 @@ const PORT = process.env.PORT || 3000;
 const parser = new xml2js.Parser({ explicitArray: false });
 
 // =======================================================
-// 🔥 GOOGLE NEWS RSS – TR + FİNANS
+// 🔥 GOOGLE NEWS RSS – TR + FİNANS (DÜZELTİLDİ)
 // =======================================================
 const NEWS_FEEDS = [
   // ALTIN
@@ -20,7 +20,11 @@ const NEWS_FEEDS = [
   "https://news.google.com/rss/search?q=altin+fiyatlari",
   "https://news.google.com/rss/search?q=gold+price",
 
-  // BİLEZİK / ATA / ÇEYREK
+  // GÜMÜŞ ✅
+  "https://news.google.com/rss/search?q=gumus+fiyat",
+  "https://news.google.com/rss/search?q=silver+price",
+
+  // BİLEZİK / ATA / ÇEYREK / YARIM
   "https://news.google.com/rss/search?q=22+ayar+bilezik",
   "https://news.google.com/rss/search?q=ata+lira",
   "https://news.google.com/rss/search?q=ceyrek+altin",
@@ -71,10 +75,25 @@ function isTurkey(text) {
 
 function detectImportance(title) {
   const t = title.toLowerCase();
-  if (t.includes("faiz") || t.includes("fed") || t.includes("tcmb") || t.includes("enflasyon"))
-    return "HIGH";
-  if (t.includes("dolar") || t.includes("euro") || t.includes("altın") || t.includes("gold") || t.includes("ons"))
-    return "MEDIUM";
+
+  if (
+    t.includes("faiz") ||
+    t.includes("fed") ||
+    t.includes("tcmb") ||
+    t.includes("enflasyon")
+  ) return "HIGH";
+
+  if (
+    t.includes("dolar") ||
+    t.includes("euro") ||
+    t.includes("altın") ||
+    t.includes("altin") ||
+    t.includes("ons") ||
+    t.includes("gümüş") ||
+    t.includes("gumus") ||
+    t.includes("silver")
+  ) return "MEDIUM";
+
   return "LOW";
 }
 
@@ -90,7 +109,7 @@ function isGarbage(title, content) {
 }
 
 // =======================================================
-// 🚀 HABER TOPLAMA
+// 🚀 HABER TOPLAMA (TEMİZ)
 // =======================================================
 async function fetchNews() {
   const allNews = [];
@@ -106,6 +125,7 @@ async function fetchNews() {
 
       const xml = await res.text();
       const json = await parser.parseStringPromise(xml);
+
       const items = json?.rss?.channel?.item;
       if (!items) continue;
 
@@ -113,14 +133,11 @@ async function fetchNews() {
 
       for (const it of list) {
         const title = cleanText(it.title);
-        let content = cleanText(it.description || "");
+        const content = cleanText(it.description || "");
         const date = it.pubDate || "";
 
         if (!title) continue;
         if (isGarbage(title, content)) continue;
-
-        // 🔥 ANDROID FİLTRESİ İÇİN ANAHTAR KELİME ENJEKSİYONU
-        content += " dolar euro altın ons gram çeyrek yarım bilezik ata usd eur try";
 
         const key = (title + date).toLowerCase();
         if (seen.has(key)) continue;
