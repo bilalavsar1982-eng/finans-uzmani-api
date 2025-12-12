@@ -11,6 +11,13 @@ const PORT = process.env.PORT || 3000;
 const parser = new xml2js.Parser({ explicitArray: false });
 
 // =======================================================
+// 🔥 CACHE
+// =======================================================
+let cachedNews = [];
+let lastFetchTime = 0;
+const CACHE_TTL = 5 * 60 * 1000; // 5 dakika
+
+// =======================================================
 // 🔥 GOOGLE NEWS – SADECE FİNANS / EKONOMİ
 // =======================================================
 const FEEDS = {
@@ -19,26 +26,21 @@ const FEEDS = {
     "https://news.google.com/rss/search?q=gram+altın+fiyat",
     "https://news.google.com/rss/search?q=ons+altın+gold+price"
   ],
-
   CEYREK: [
     "https://news.google.com/rss/search?q=çeyrek+altın+fiyat+ekonomi"
   ],
-
   DOLAR: [
     "https://news.google.com/rss/search?q=dolar+tl+ekonomi",
     "https://news.google.com/rss/search?q=usdtry+ekonomi"
   ],
-
   EURO: [
     "https://news.google.com/rss/search?q=euro+tl+ekonomi",
     "https://news.google.com/rss/search?q=eurtry+ekonomi"
   ],
-
   GUMUS: [
     "https://news.google.com/rss/search?q=gümüş+fiyatları+ekonomi",
     "https://news.google.com/rss/search?q=silver+price+market"
   ],
-
   MAKRO: [
     "https://news.google.com/rss/search?q=tcmb+faiz+kararı",
     "https://news.google.com/rss/search?q=fed+interest+rate",
@@ -47,7 +49,7 @@ const FEEDS = {
 };
 
 // =======================================================
-// 🧠 YARDIMCI FONKSİYONLAR
+// 🧠 YARDIMCI FONKSİYONLAR (AYNI)
 // =======================================================
 function toTr(url) {
   return url.includes("?")
@@ -65,7 +67,6 @@ function cleanText(s = "") {
 
 function isGarbage(title, content) {
   const t = (title + " " + content).toLowerCase();
-
   return (
     t.includes("gelinim") ||
     t.includes("mutfakta") ||
@@ -75,46 +76,24 @@ function isGarbage(title, content) {
     t.includes("final") ||
     t.includes("kim elendi") ||
     t.includes("video") ||
-    t.includes("magazin") ||
-    t.includes("şarkı") ||
-    t.includes("song")
+    t.includes("magazin")
   );
 }
 
 function detectImportance(title) {
   const t = title.toLowerCase();
-
-  if (
-    t.includes("faiz") ||
-    t.includes("fed") ||
-    t.includes("tcmb") ||
-    t.includes("enflasyon")
-  ) return "HIGH";
-
-  if (
-    t.includes("dolar") ||
-    t.includes("euro") ||
-    t.includes("altın") ||
-    t.includes("gümüş") ||
-    t.includes("ons") ||
-    t.includes("kur")
-  ) return "MEDIUM";
-
+  if (t.includes("faiz") || t.includes("fed") || t.includes("tcmb") || t.includes("enflasyon")) return "HIGH";
+  if (t.includes("dolar") || t.includes("euro") || t.includes("altın") || t.includes("gümüş") || t.includes("ons")) return "MEDIUM";
   return "LOW";
 }
 
 function isTurkey(text) {
   const t = text.toLowerCase();
-  return (
-    t.includes("türkiye") ||
-    t.includes("turkiye") ||
-    t.includes("tcmb") ||
-    t.includes("bist")
-  );
+  return t.includes("türkiye") || t.includes("turkiye") || t.includes("tcmb") || t.includes("bist");
 }
 
 // =======================================================
-// 🚀 HABER TOPLAMA (TEMİZ)
+// 🚀 HABER TOPLAMA (TEK YERDEN)
 // =======================================================
 async function fetchNews() {
   const all = [];
@@ -122,7 +101,6 @@ async function fetchNews() {
 
   for (const group of Object.values(FEEDS)) {
     for (const rawUrl of group) {
-
       try {
         const res = await fetch(toTr(rawUrl), {
           headers: { "User-Agent": "Mozilla/5.0" }
@@ -155,7 +133,6 @@ async function fetchNews() {
             isTurkey: isTurkey(title + " " + content)
           });
         }
-
       } catch (e) {
         console.log("RSS hata:", e.message);
       }
@@ -167,18 +144,18 @@ async function fetchNews() {
 }
 
 // =======================================================
-// 🌐 ENDPOINTLER
+// 🌐 ENDPOINT (CACHE'Lİ)
 // =======================================================
-app.get("/news", async (_, res) => {
-  const data = await fetchNews();
-  console.log(`✔ Haber sayısı: ${data.length}`);
-  res.json(data);
-});
-
 app.get("/haberler", async (_, res) => {
-  const data = await fetchNews();
-  console.log(`✔ Haber sayısı: ${data.length}`);
-  res.json(data);
+  const now = Date.now();
+
+  if (now - lastFetchTime > CACHE_TTL || cachedNews.length === 0) {
+    cachedNews = await fetchNews();
+    lastFetchTime = now;
+    console.log(`🟢 Haber cache güncellendi: ${cachedNews.length}`);
+  }
+
+  res.json(cachedNews);
 });
 
 // =======================================================
