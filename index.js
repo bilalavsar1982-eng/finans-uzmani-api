@@ -1,16 +1,18 @@
 import express from "express";
 import cors from "cors";
 import fetch from "node-fetch";
+import Parser from "rss-parser";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const rss = new Parser();
 
-// ===========================================
+// ======================================================
 //  ÜRÜNLER
-// ===========================================
+// ======================================================
 const PRODUCTS = [
     { name: "Gram Altın", code: "HASTRY" },
     { name: "Ons Altın", code: "ONS" },
@@ -24,39 +26,128 @@ const PRODUCTS = [
     { name: "22 Ayar", code: "22 AYAR" }
 ];
 
-let GLOBAL_DECISIONS = {}; // tüm kararlar tek yerde
+let GLOBAL_DECISIONS = {};    
+let GLOBAL_NEWS = [];          // ⭐ Android buradan haber çekecek
 
-// ===========================================
+// ======================================================
+//  HABER MOTORU → GOOGLE NEWS RSS
+// ======================================================
+const NEWS_FEEDS = [
+    "https://news.google.com/rss/search?q=altın",
+    "https://news.google.com/rss/search?q=gram+altın",
+    "https://news.google.com/rss/search?q=dolar",
+    "https://news.google.com/rss/search?q=ons",
+    "https://news.google.com/rss/search?q=fed+faiz",
+    "https://news.google.com/rss/search?q=tcmb",
+    "https://news.google.com/rss/search?q=jeopolitik"
+];
+
+// Haberleri sınıflandırma
+async function classifyNews(text) {
+
+    const prompt = `
+Aşağıdaki haber metnini analiz et ve JSON döndür.
+
+Metin:
+"${text}"
+
+Kategori seçenekleri:
+FED, TCMB, GOLD, DXY, GEOPOLITIC, INFLATION, MARKET, OTHER
+
+Önem derecesi:
+HIGH, MEDIUM, LOW
+
+Sadece şu formatta JSON üret:
+{
+ "category": "...",
+ "importance": "...",
+ "isTurkey": true/false
+}
+`;
+
+    const payload = {
+        model: "gpt-4o-mini",
+        messages: [
+            { role: "system", content: prompt }
+        ]
+    };
+
+    try {
+        const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+            method: "POST",
+            headers: {
+                "Authorization": `Bearer ${OPENAI_API_KEY}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(payload)
+        });
+
+        const txt = await resp.text();
+        return JSON.parse(txt);
+
+    } catch {
+        return {
+            category: "OTHER",
+            importance: "LOW",
+            isTurkey: false
+        };
+    }
+}
+
+// RSS’ten haber çekme
+async function fetchNews() {
+    let results = [];
+
+    for (let feed of NEWS_FEEDS) {
+        try {
+            const parsed = await rss.parseURL(feed);
+
+            for (let item of parsed.items.slice(0, 5)) {
+
+                const summary = `${item.title} ${item.contentSnippet}`;
+
+                const ai = await classifyNews(summary);
+
+                results.push({
+                    title: item.title,
+                    content: item.contentSnippet,
+                    date: item.pubDate,
+                    category: ai.category,
+                    importance: ai.importance,
+                    isTurkey: ai.isTurkey
+                });
+            }
+        } catch (err) {
+            console.log("RSS Hatası:", err);
+        }
+    }
+
+    GLOBAL_NEWS = results;
+    console.log("✔ Haberler güncellendi:", results.length);
+}
+
+// İlk çalıştırma
+fetchNews();
+// Her 3 saatte bir güncelle
+setInterval(fetchNews, 1000 * 60 * 60 * 3);
+
+// ======================================================
 //  TEK API ÇAĞRISIYLA 10 ÜRÜN KARARI AL
-// ===========================================
+// ======================================================
 async function generateAllDecisionsOnStartup() {
 
     const systemPrompt = `
 Sen profesyonel bir finans analistisın.
-Kendini asla yapay zeka olarak tanıtma.
-
-Her bir ürün için 50 faktöre dayalı karar ver:
-- Faizler, enflasyon, DXY, ABD tahvilleri
-- Jeopolitik riskler, ETF akımları, likidite
-- Teknik: trend, momentum, hacim, volatilite
-- Psikoloji, para politikası, arz/talep
-
-Görev:
-Aşağıdaki formatta JSON üret:
+Sadece JSON üret.
 
 {
  "HASTRY": "AL",
- "ONS": "BEKLE",
- "USDTRY": "SAT",
+ "ONS": "SAT",
  ...
 }
-
-Sadece AL / SAT / BEKLE kullan.
-Başka açıklama yazma. Sadece JSON üret.
 `;
 
-    let userPrompt = "Aşağıdaki ürünlerin her biri için karar ver:\n\n";
-
+    let userPrompt = "Aşağıdaki ürünler için karar üret:\n\n";
     for (let p of PRODUCTS) {
         userPrompt += `${p.code} = ${p.name}\n`;
     }
@@ -83,12 +174,11 @@ Başka açıklama yazma. Sadece JSON üret.
         let data = {};
 
         try {
-            data = JSON.parse(txt); // JSON bekliyoruz zaten
+            data = JSON.parse(txt);
         } catch {
-            console.log("⚠ JSON parse hatası, cevap:", txt);
+            console.log("⚠ JSON parse hatası:", txt);
         }
 
-        // JSON içindeki kararları GLOBAL’e yaz
         for (let p of PRODUCTS) {
             GLOBAL_DECISIONS[p.code] = data[p.code] || "BEKLE";
         }
@@ -100,19 +190,25 @@ Başka açıklama yazma. Sadece JSON üret.
     }
 }
 
-// Sunucu açılır açılmaz 1 kere çalışır
 generateAllDecisionsOnStartup();
 
-// ===========================================
-//  ANDROID GET: TÜM KARARLAR
-// ===========================================
+// ======================================================
+//  ANDROID: TÜM KARARLAR
+// ======================================================
 app.get("/tum-kararlar", (req, res) => {
     res.json(GLOBAL_DECISIONS);
 });
 
-// ===========================================
-//  SOHBET: TEK ÜRÜN KARARINI GÜNCELLER
-// ===========================================
+// ======================================================
+//  ANDROID: HABERLERİ VER
+// ======================================================
+app.get("/haberler", (req, res) => {
+    res.json(GLOBAL_NEWS);
+});
+
+// ======================================================
+//  SOHBET: TEK ÜRÜN KARARI GÜNCELLER
+// ======================================================
 app.post("/finans-uzmani", async (req, res) => {
 
     const userMessage = req.body.mesaj || "";
@@ -120,14 +216,13 @@ app.post("/finans-uzmani", async (req, res) => {
 
     const systemPrompt = `
 Sen profesyonel bir finans analistisın.
-İnsan gibi doğal konuş.
-Ama cevabın sonunda MUTLAKA:
+Cevabın sonunda:
 
 Karar: AL
 Karar: SAT
 Karar: BEKLE
 
-formatını kullan.
+KULLAN.
 `;
 
     const payload = {
@@ -174,7 +269,7 @@ formatını kullan.
     }
 });
 
-// ===========================================
+// ======================================================
 app.listen(3000, () => {
     console.log("🚀 Finans Uzmanı API ÇALIŞIYOR!");
 });
