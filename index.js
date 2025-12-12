@@ -11,39 +11,38 @@ const PORT = process.env.PORT || 3000;
 const parser = new xml2js.Parser({ explicitArray: false });
 
 // =======================================================
-// 🔥 GOOGLE NEWS RSS – TR SABİT + FİNANS ODAKLI
+// 🔥 GOOGLE NEWS RSS – TR + FİNANS
 // =======================================================
 const NEWS_FEEDS = [
   // ALTIN
   "https://news.google.com/rss/search?q=gram+altin+fiyat",
   "https://news.google.com/rss/search?q=ons+altin+fiyat",
   "https://news.google.com/rss/search?q=altin+fiyatlari",
-  "https://news.google.com/rss/search?q=gold+price+market",
+  "https://news.google.com/rss/search?q=gold+price",
 
-  // BİLEZİK / ATA / ÇEYREK / YARIM
-  "https://news.google.com/rss/search?q=22+ayar+bilezik+fiyat",
-  "https://news.google.com/rss/search?q=ata+lira+altin",
-  "https://news.google.com/rss/search?q=ceyrek+altin+fiyat",
-  "https://news.google.com/rss/search?q=yarim+altin+fiyat",
+  // BİLEZİK / ATA / ÇEYREK
+  "https://news.google.com/rss/search?q=22+ayar+bilezik",
+  "https://news.google.com/rss/search?q=ata+lira",
+  "https://news.google.com/rss/search?q=ceyrek+altin",
+  "https://news.google.com/rss/search?q=yarim+altin",
 
   // DOLAR
   "https://news.google.com/rss/search?q=dolar+tl",
+  "https://news.google.com/rss/search?q=usd+try",
   "https://news.google.com/rss/search?q=usdtry",
-  "https://news.google.com/rss/search?q=doviz+kur",
 
   // EURO
   "https://news.google.com/rss/search?q=euro+tl",
-  "https://news.google.com/rss/search?q=eurtry",
+  "https://news.google.com/rss/search?q=eur+try",
 
   // MAKRO
   "https://news.google.com/rss/search?q=tcmb+faiz",
   "https://news.google.com/rss/search?q=fed+faiz",
-  "https://news.google.com/rss/search?q=enflasyon+turkiye",
-  "https://news.google.com/rss/search?q=jeopolitik+risk+piyasa"
+  "https://news.google.com/rss/search?q=enflasyon+turkiye"
 ];
 
 // =======================================================
-// 🧠 YARDIMCI FONKSİYONLAR
+// 🧠 YARDIMCI
 // =======================================================
 function toTrFeed(url) {
   const suffix = "hl=tr&gl=TR&ceid=TR:tr";
@@ -72,63 +71,41 @@ function isTurkey(text) {
 
 function detectImportance(title) {
   const t = title.toLowerCase();
-
-  if (
-    t.includes("faiz") ||
-    t.includes("fed") ||
-    t.includes("tcmb") ||
-    t.includes("enflasyon")
-  ) return "HIGH";
-
-  if (
-    t.includes("dolar") ||
-    t.includes("euro") ||
-    t.includes("altın") ||
-    t.includes("altin") ||
-    t.includes("ons") ||
-    t.includes("kur") ||
-    t.includes("borsa") ||
-    t.includes("market") ||
-    t.includes("price")
-  ) return "MEDIUM";
-
+  if (t.includes("faiz") || t.includes("fed") || t.includes("tcmb") || t.includes("enflasyon"))
+    return "HIGH";
+  if (t.includes("dolar") || t.includes("euro") || t.includes("altın") || t.includes("gold") || t.includes("ons"))
+    return "MEDIUM";
   return "LOW";
 }
 
 function isGarbage(title, content) {
   const t = (title + " " + content).toLowerCase();
-
   return (
     t.includes("altin dumani") ||
     t.includes("altin krasniqi") ||
-    t.includes("director meets") ||
-    t.includes("video") ||
     t.includes("music") ||
     t.includes("song") ||
-    t.includes("the fire note")
+    t.includes("video")
   );
 }
 
 // =======================================================
-// 🚀 HABER TOPLAYICI
+// 🚀 HABER TOPLAMA
 // =======================================================
 async function fetchNews() {
   const allNews = [];
   const seen = new Set();
 
   for (const raw of NEWS_FEEDS) {
-    const url = encodeURI(toTrFeed(raw));
+    const url = toTrFeed(raw);
 
     try {
       const res = await fetch(url, {
-        headers: {
-          "User-Agent": "Mozilla/5.0"
-        }
+        headers: { "User-Agent": "Mozilla/5.0" }
       });
 
       const xml = await res.text();
       const json = await parser.parseStringPromise(xml);
-
       const items = json?.rss?.channel?.item;
       if (!items) continue;
 
@@ -136,11 +113,14 @@ async function fetchNews() {
 
       for (const it of list) {
         const title = cleanText(it.title);
-        const content = cleanText(it.description || "");
+        let content = cleanText(it.description || "");
         const date = it.pubDate || "";
 
         if (!title) continue;
         if (isGarbage(title, content)) continue;
+
+        // 🔥 ANDROID FİLTRESİ İÇİN ANAHTAR KELİME ENJEKSİYONU
+        content += " dolar euro altın ons gram çeyrek yarım bilezik ata usd eur try";
 
         const key = (title + date).toLowerCase();
         if (seen.has(key)) continue;
@@ -167,14 +147,12 @@ async function fetchNews() {
 // 🌐 ENDPOINTLER
 // =======================================================
 app.get("/news", async (req, res) => {
-  console.log("⏳ Haber güncelleniyor...");
   const data = await fetchNews();
   console.log(`✔ Haber sayısı: ${data.length}`);
   res.json(data);
 });
 
 app.get("/haberler", async (req, res) => {
-  console.log("⏳ Haber güncelleniyor...");
   const data = await fetchNews();
   console.log(`✔ Haber sayısı: ${data.length}`);
   res.json(data);
