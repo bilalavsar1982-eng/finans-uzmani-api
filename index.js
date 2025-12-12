@@ -57,7 +57,7 @@ async function fetchRawNews() {
         }
     }
 
-    return results.slice(0, 40);
+    return results.slice(0, 50);
 }
 
 // ======================================================
