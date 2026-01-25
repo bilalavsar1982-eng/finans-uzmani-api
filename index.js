@@ -159,6 +159,48 @@ app.get("/haberler", async (_, res) => {
 });
 
 // =======================================================
+// 🟡 SADECE METALSDAILY – GOLD NEWS (YENİ, BAĞIMSIZ)
+// =======================================================
+app.get("/metalsdaily/gold", async (_, res) => {
+  try {
+    const { load } = await import("cheerio");
+
+    const r = await fetch("https://www.metalsdaily.com/news/gold-news/", {
+      headers: {
+        "User-Agent": "Mozilla/5.0"
+      }
+    });
+
+    if (!r.ok) {
+      return res.status(500).json({ error: "MetalsDaily erişilemedi" });
+    }
+
+    const html = await r.text();
+    const $ = load(html);
+
+    const news = [];
+
+    $(".view-content article").each((_, el) => {
+      const title = $(el).find("h2 a").text().trim();
+      const link = $(el).find("h2 a").attr("href");
+
+      if (title && link) {
+        news.push({
+          title,
+          link: link.startsWith("http")
+            ? link
+            : "https://www.metalsdaily.com" + link
+        });
+      }
+    });
+
+    res.json(news.slice(0, 20));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// =======================================================
 app.listen(PORT, () => {
   console.log("🚀 Finans Haber Backend ÇALIŞIYOR");
 });
